@@ -1,0 +1,5 @@
+{
+  "name": "GeoGebra AI Builder",
+  "description": "A React application that converts Vietnamese spatial geometry problems into GeoGebra 3D constructions using a mock AI parser.",
+  "requestFramePermissions": []
+}
