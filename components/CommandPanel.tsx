@@ -123,6 +123,7 @@ const CommandPanel: React.FC<CommandPanelProps> = ({ construction, onUpdateComma
           spellCheck={false}
           value={activeTab === Tab.RAW ? scriptContent : jsonContent}
           onChange={(e) => activeTab === Tab.RAW ? setScriptContent(e.target.value) : setJsonContent(e.target.value)}
+          onBlur={handleRun}
         />
       </div>
 

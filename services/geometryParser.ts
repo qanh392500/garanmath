@@ -3,24 +3,22 @@ import { GeoGebraConstruction } from '../types';
 export interface ChatResponse {
   message: string;
   commands: string[];
+  trace?: {
+    planner: string[];
+    rag: string[];
+  };
 }
 
 const API_BASE_URL = 'http://localhost:3001/api';
 
-const getAuthHeader = (token?: string | null) => {
-  const finalToken = token || localStorage.getItem('token');
-  console.log("DEBUG: Token used for request:", finalToken ? finalToken.substring(0, 10) + "..." : "null");
-  return finalToken ? { 'Authorization': `Bearer ${finalToken}` } : {};
-};
-
-export const generateGeoGebraCommands = async (problemText: string, imageBase64: string | null = null, token?: string | null): Promise<GeoGebraConstruction> => {
+export const generateGeoGebraCommands = async (problemText: string, imageBase64: string | null = null): Promise<GeoGebraConstruction> => {
   try {
     const response = await fetch(`${API_BASE_URL}/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeader(token),
       },
+      credentials: 'include',
       body: JSON.stringify({
         problemText,
         imageBase64,
@@ -41,14 +39,14 @@ export const generateGeoGebraCommands = async (problemText: string, imageBase64:
   }
 };
 
-export const generateIncrementalCommands = async (chatMessage: string, currentCommands: string[] = [], history: { role: 'user' | 'model', text: string }[] = [], token?: string | null): Promise<ChatResponse> => {
+export const generateIncrementalCommands = async (chatMessage: string, currentCommands: string[] = [], history: { role: 'user' | 'model', text: string }[] = []): Promise<ChatResponse> => {
   try {
     const response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeader(token),
       },
+      credentials: 'include',
       body: JSON.stringify({
         message: chatMessage,
         currentCommands,

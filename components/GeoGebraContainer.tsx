@@ -12,14 +12,60 @@ export interface GeoGebraRef {
   setGlobalPointSize: (size: number) => void;
 }
 
-const GeoGebraContainer = forwardRef<GeoGebraRef>((props, ref) => {
+export interface GeoGebraContainerProps {
+  transparentGraphics?: boolean;
+}
+
+const GeoGebraContainer = forwardRef<GeoGebraRef, GeoGebraContainerProps>(({ transparentGraphics = true }, ref) => {
   const containerId = 'ggb-element';
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = useState(false);
   const initRef = useRef(false);
-  
+  const currentXML = useRef<string>('');
+
+  // Helper to extract all commands/definitions
+  const extractScript = () => {
+    if (!window.ggbApplet) return [];
+
+    try {
+      const applet = window.ggbApplet;
+      const objNames = applet.getAllObjectNames();
+      const commands: string[] = [];
+
+      objNames.forEach(name => {
+        // 1. Try to get the INTERNAL command (e.g., "Sphere(A, B)")
+        // Pass false to get the English command, not the localized one
+        const cmd = applet.getCommandString(name, false);
+
+        if (cmd) {
+          // If it's a command, format as "Name = Command"
+          commands.push(`${name} = ${cmd}`);
+        } else {
+          // 2. If no command (e.g., free points), get definition (e.g., "A = (1, 2)")
+          const def = applet.getDefinitionString(name);
+          if (def) {
+            commands.push(def);
+          }
+        }
+      });
+
+      return commands;
+    } catch (e) {
+      console.error("Error extracting script", e);
+      return [];
+    }
+  };
+
   useEffect(() => {
-    if (initRef.current) return;
+    // If already initialized, we might be re-initializing due to prop change
+    // Save current state if applet exists
+    if (window.ggbApplet && typeof window.ggbApplet.getXML === 'function') {
+      try {
+        currentXML.current = window.ggbApplet.getXML();
+      } catch (e) {
+        console.warn("Could not save XML before re-init", e);
+      }
+    }
 
     const initApplet = () => {
       if (window.GGBApplet && wrapperRef.current) {
@@ -33,33 +79,42 @@ const GeoGebraContainer = forwardRef<GeoGebraRef>((props, ref) => {
           appName: '3d',
           width: initialWidth,
           height: initialHeight,
-          showToolBar: false, 
-          showAlgebraInput: false, 
-          showMenuBar: false,
+          showToolBar: true,
+          showAlgebraInput: true,
+          showMenuBar: true,
           perspective: "5", // "5" is the code for 3D Graphics ONLY (hides Algebra View)
           borderColor: 'none',
-          transparentGraphics: false,
-          allowStyleBar: false, // Hide the small style bar inside canvas too for cleaner look
+          transparentGraphics: transparentGraphics, // Use prop
+          allowStyleBar: true, // Hide the small style bar inside canvas too for cleaner look
           scaleContainerClass: 'ggb-container',
           allowUpScaling: true,
-          showResetIcon: false,
+          showResetIcon: true,
         };
+
+        // Clear container if re-initializing
+        const container = document.getElementById(containerId);
+        if (container) container.innerHTML = '';
 
         // @ts-ignore
         const applet = new window.GGBApplet(params, true);
         applet.inject(containerId);
 
         const checkInterval = setInterval(() => {
-            if (window.ggbApplet && typeof window.ggbApplet.evalCommand === 'function') {
-                setIsReady(true);
-                // CRITICAL FIX: Force resize to match container exactly once ready
-                if (wrapperRef.current) {
-                  const w = Math.floor(wrapperRef.current.clientWidth);
-                  const h = Math.floor(wrapperRef.current.clientHeight);
-                  window.ggbApplet.setSize(w, h);
-                }
-                clearInterval(checkInterval);
+          if (window.ggbApplet && typeof window.ggbApplet.evalCommand === 'function') {
+            setIsReady(true);
+            // CRITICAL FIX: Force resize to match container exactly once ready
+            if (wrapperRef.current) {
+              const w = Math.floor(wrapperRef.current.clientWidth);
+              const h = Math.floor(wrapperRef.current.clientHeight);
+              window.ggbApplet.setSize(w, h);
+              // Restore XML if we have it
+              if (currentXML.current) {
+                window.ggbApplet.setXML(currentXML.current);
+              }
+
+              clearInterval(checkInterval);
             }
+          }
         }, 300);
       }
     };
@@ -71,18 +126,18 @@ const GeoGebraContainer = forwardRef<GeoGebraRef>((props, ref) => {
       window.addEventListener('load', listener);
       return () => window.removeEventListener('load', listener);
     }
-  }, []);
+  }, [transparentGraphics]); // Re-run when transparentGraphics changes
 
   // Robust Resize Observer
   useEffect(() => {
     if (!wrapperRef.current) return;
-    
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         // Use Math.floor to prevent sub-pixel rendering causing scrollbars
         const width = Math.floor(entry.contentRect.width);
         const height = Math.floor(entry.contentRect.height);
-        
+
         if (window.ggbApplet && typeof window.ggbApplet.setSize === 'function') {
           // Only update if dimensions are valid
           if (width > 0 && height > 0) {
@@ -91,7 +146,7 @@ const GeoGebraContainer = forwardRef<GeoGebraRef>((props, ref) => {
         }
       }
     });
-    
+
     observer.observe(wrapperRef.current);
     return () => observer.disconnect();
   }, []);
@@ -108,7 +163,7 @@ const GeoGebraContainer = forwardRef<GeoGebraRef>((props, ref) => {
         applet.setPerspective("5"); // Enforce 3D View Only
         commands.forEach(cmd => {
           if (cmd && !cmd.startsWith('//')) {
-             applet.evalCommand(cmd);
+            applet.evalCommand(cmd);
           }
         });
       } catch (e) {
@@ -130,7 +185,7 @@ const GeoGebraContainer = forwardRef<GeoGebraRef>((props, ref) => {
     setGlobalLineThickness: (thickness: number) => {
       const applet = window.ggbApplet;
       if (!applet) return;
-      
+
       const allObjs = applet.getAllObjectNames();
       allObjs.forEach(obj => {
         const type = applet.getObjectType(obj);
@@ -143,7 +198,7 @@ const GeoGebraContainer = forwardRef<GeoGebraRef>((props, ref) => {
     setGlobalPointSize: (size: number) => {
       const applet = window.ggbApplet;
       if (!applet) return;
-      
+
       const allObjs = applet.getAllObjectNames();
       allObjs.forEach(obj => {
         const type = applet.getObjectType(obj);
@@ -157,22 +212,22 @@ const GeoGebraContainer = forwardRef<GeoGebraRef>((props, ref) => {
   return (
     <div ref={wrapperRef} className="relative w-full h-full bg-white dark:bg-[#0f172a] overflow-hidden group">
       <div id={containerId} className="w-full h-full"></div>
-      
+
       {!isReady && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 dark:bg-[#0f172a] z-20 gap-3">
-              <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-              <div className="text-sm font-medium text-slate-500 dark:text-slate-400 animate-pulse">
-                 Loading Engine...
-              </div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 dark:bg-[#0f172a] z-20 gap-3">
+          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <div className="text-sm font-medium text-slate-500 dark:text-slate-400 animate-pulse">
+            Loading Engine...
           </div>
+        </div>
       )}
-      
+
       {/* Ready Indicator Overlay */}
       {isReady && (
         <div className="absolute bottom-3 right-3 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
-           <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm px-2 py-1 rounded text-[10px] text-slate-500 font-mono border border-slate-200 dark:border-slate-700 shadow-sm">
-             GGB Active
-           </div>
+          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm px-2 py-1 rounded text-[10px] text-slate-500 font-mono border border-slate-200 dark:border-slate-700 shadow-sm">
+            GGB Active
+          </div>
         </div>
       )}
     </div>

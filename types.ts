@@ -10,6 +10,10 @@ export interface GeoGebraConstruction {
   segments: [string, string][]; // Array of point name pairs, e.g., ["A", "B"]
   rawCommands: string[]; // The actual commands sent to GGB
   description: string; // Brief description of what was detected
+  trace?: {
+    planner: string[];
+    rag: string[];
+  };
 }
 
 // Global window augmentation for GeoGebra
@@ -31,7 +35,7 @@ declare global {
       setFixed: (objName: string, fixed: boolean, selectionAllowed: boolean) => void;
       setLineThickness: (objName: string, thickness: number) => void;
       setPointSize: (objName: string, size: number) => void;
-      
+
       // Data Retrieval
       getAllObjectNames: () => string[];
       getObjectType: (objName: string) => string;
@@ -42,6 +46,15 @@ declare global {
       renameObject: (oldName: string, newName: string) => boolean;
       exists: (objName: string) => boolean;
       setSize: (width: number, height: number) => void;
+      getXML: () => string;
+      setXML: (xml: string) => void;
+      registerAddListener: (JSFunctionName: string) => void;
+      registerRemoveListener: (JSFunctionName: string) => void;
+      registerUpdateListener: (JSFunctionName: string) => void;
+      registerRenameListener: (JSFunctionName: string) => void;
+      getDefinitionString: (objName: string) => string;
+      getCommandString: (objName: string, localized?: boolean) => string;
+      getValueString: (objName: string) => string;
     };
   }
 }

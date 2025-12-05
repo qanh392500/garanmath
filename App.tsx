@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import ProblemInput from './components/ProblemInput';
 import CommandPanel from './components/CommandPanel';
 import ChatPanel, { ChatPanelRef } from './components/ChatPanel';
@@ -9,6 +9,11 @@ import { GeoGebraConstruction } from './types';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import logo from './pages/logo.jpg';
+import ApiKeySettings from './components/ApiKeySettings';
+import AdminPage from './pages/AdminPage';
+import PromotePage from './pages/PromotePage';
+import DonateModal from './components/DonateModal';
 
 type LeftPanelMode = 'input' | 'chat';
 
@@ -32,27 +37,50 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
+// Helper Component
+const ActionButton: React.FC<{ onClick: () => void, disabled: boolean, icon: React.ReactNode, label: string, colorClass: string }> = ({ onClick, disabled, icon, label, colorClass }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${disabled ? 'opacity-40 cursor-not-allowed' : colorClass}`}
+  >
+    {icon}
+    <span className="hidden sm:inline">{label}</span>
+  </button>
+);
+
 // --- Main Application Logic (Formerly App) ---
 const MainApp: React.FC = () => {
+  const navigate = useNavigate();
   const [isGenerating, setIsGenerating] = useState(false);
   const [construction, setConstruction] = useState<GeoGebraConstruction | null>(null);
   const [darkMode, setDarkMode] = useState(true);
   const [activePanel, setActivePanel] = useState<LeftPanelMode>('input');
   const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'model', text: string }[]>([]);
+  const [history, setHistory] = useState<GeoGebraConstruction[]>([]); // Undo History
 
   // Auth Context
-  const { user, token, logout } = useAuth();
+  const { user, logout } = useAuth();
 
   // Resizable State
-  const [commandPanelHeight, setCommandPanelHeight] = useState(200); // Default height px
+  // Default height: 55% of window height (Top 45%, Bottom 55%)
+  const [commandPanelHeight, setCommandPanelHeight] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerHeight * 0.55;
+    }
+    return 500; // Fallback
+  });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartY = useRef(0);
   const dragStartHeight = useRef(0);
 
   // GeoGebra Style State
-  const [lineThickness, setLineThickness] = useState(5);
-  const [pointSize, setPointSize] = useState(5);
+  const [lineThickness, setLineThickness] = useState(2);
+  const [pointSize, setPointSize] = useState(2);
   const [sliderMode, setSliderMode] = useState<'line' | 'point'>('line');
+  const [isTransparent, setIsTransparent] = useState(false);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [isDonateModalOpen, setIsDonateModalOpen] = useState(false);
 
   const ggbRef = useRef<GeoGebraRef>(null);
   const chatRef = useRef<ChatPanelRef>(null);
@@ -69,6 +97,13 @@ const MainApp: React.FC = () => {
       document.documentElement.classList.remove('dark');
     }
   }, [darkMode]);
+
+  // Check for API Key
+  useEffect(() => {
+    if (user && !user.hasApiKey) {
+      setIsApiKeyModalOpen(true);
+    }
+  }, [user]);
 
   // Resizable Logic
   const startResizing = (e: React.MouseEvent) => {
@@ -115,7 +150,22 @@ const MainApp: React.FC = () => {
   const handleGenerate = async (text: string, imageBase64: string | null) => {
     setIsGenerating(true);
     try {
-      const result = await generateGeoGebraCommands(text, imageBase64, token);
+      const result = await generateGeoGebraCommands(text, imageBase64);
+
+      // --- VISUALIZATION: Log Thought Process ---
+      if (result.trace) {
+        console.group("🧠 AI Thought Process (Generate)");
+        console.log("📝 Planned Steps:");
+        console.table(result.trace.planner);
+        console.log("📚 RAG Context:");
+        console.table(result.trace.rag);
+        console.log("💻 Generated Commands:");
+        console.log(result.rawCommands.join('\n'));
+        console.groupEnd();
+      }
+      // ------------------------------------------
+
+      setHistory([]); // Clear undo history for new problem
       setChatHistory([]); // Clear history for new problem
       chatRef.current?.clearMessages(); // Clear UI messages
       setConstruction(result);
@@ -160,6 +210,11 @@ const MainApp: React.FC = () => {
   };
 
   const handleManualUpdate = (newCommands: string[]) => {
+    // Save to history before updating
+    if (construction) {
+      setHistory(prev => [...prev, construction]);
+    }
+
     // 1. Update State
     setConstruction(prev => {
       if (!prev) return null;
@@ -183,49 +238,76 @@ const MainApp: React.FC = () => {
 
   const handleChatCommand = async (message: string) => {
     try {
+      // Save to history before updating (if we have a valid result later)
+      const stateBeforeUpdate = construction;
+
       const currentCmds = construction?.rawCommands || [];
       // Optimistic UI update could go here
 
-      const result = await generateIncrementalCommands(message, currentCmds, chatHistory, token);
+      // NOTE: generateIncrementalCommands now returns the FULL script (State-Driven)
+      // Pass empty array for history to make it stateless as requested
+      const result = await generateIncrementalCommands(message, currentCmds, []);
 
-      // Update History
-      setChatHistory(prev => [
-        ...prev,
-        { role: 'user', text: message },
-        { role: 'model', text: result.message }
-      ]);
+      // Update History - DISABLED as requested (Stateless Mode)
+      // setChatHistory(prev => [
+      //   ...prev,
+      //   { role: 'user', text: message },
+      //   { role: 'model', text: result.message }
+      // ]);
 
       if (ggbRef.current && result.commands && result.commands.length > 0) {
-        // Execute new commands
-        result.commands.forEach(cmd => {
-          ggbRef.current?.evalCommand(cmd);
-        });
+        // --- VISUALIZATION: Log Thought Process ---
+        if (result.trace) {
+          console.group("🧠 AI Thought Process (Chat)");
+          console.log("📝 Planned Steps:");
+          console.table(result.trace.planner);
+          console.log("📚 RAG Context:");
+          console.table(result.trace.rag);
+          console.log("💻 Generated Commands:");
+          console.log(result.commands.join('\n'));
+          console.groupEnd();
+        }
+        // ------------------------------------------
 
-        // CRITICAL FIX: Re-apply global styles with a slight delay
-        // This ensures GeoGebra has finished creating the new objects before we apply styles
-        // preventing the "reset" look.
+        // State-Driven Update: Reload full script
+        ggbRef.current.loadCommands(result.commands);
+
+        // Save history only if we actually have changes
+        if (stateBeforeUpdate) {
+          setHistory(prev => [...prev, stateBeforeUpdate]);
+        }
+
+        // Update local state
+        setConstruction(prev => ({
+          ...prev!,
+          rawCommands: result.commands
+        }));
+
+        // Re-apply global settings
         setTimeout(() => {
-          ggbRef.current?.setGlobalLineThickness(lineThickness);
-          ggbRef.current?.setGlobalPointSize(pointSize);
-        }, 150);
+          if (ggbRef.current) {
+            ggbRef.current.setGlobalLineThickness(lineThickness);
+            ggbRef.current.setGlobalPointSize(pointSize);
+          }
+        }, 500);
+      }     // Update State with the NEW FULL SCRIPT
+      // Update State with the NEW FULL SCRIPT
+      setConstruction(prev => {
+        const base = prev || {
+          points: [],
+          segments: [],
+          rawCommands: [],
+          description: "Interactive Session"
+        };
 
-        // Update State
-        setConstruction(prev => {
-          const base = prev || {
-            points: [],
-            segments: [],
-            rawCommands: [],
-            description: "Interactive Session"
-          };
+        return {
+          ...base,
+          rawCommands: result.commands, // Replace, don't append
+          description: base.description + ` (Cập nhật: ${message})`
+        };
+      });
 
-          return {
-            ...base,
-            rawCommands: [...base.rawCommands, ...result.commands],
-            description: base.description + ` (Cập nhật: ${message})`
-          };
-        });
-      }
-      chatRef.current?.addResponse(result.message);
+      chatRef.current?.addResponse(result.message, false, result.trace);
     } catch (error: any) {
       console.error("Chat command failed", error);
       chatRef.current?.addResponse(`⚠️ Lỗi: ${error.message || "Không thể xử lý yêu cầu."}`, true);
@@ -270,18 +352,40 @@ const MainApp: React.FC = () => {
     setSliderMode(prev => prev === 'line' ? 'point' : 'line');
   };
 
+  const handleUndo = () => {
+    if (history.length === 0) return;
+
+    const previousState = history[history.length - 1];
+    const newHistory = history.slice(0, -1);
+
+    setHistory(newHistory);
+    setConstruction(previousState);
+
+    if (ggbRef.current && previousState) {
+      ggbRef.current.loadCommands(previousState.rawCommands);
+      // Re-apply styles
+      setTimeout(() => {
+        ggbRef.current?.setGlobalLineThickness(lineThickness);
+      }, 300);
+    }
+  };
+
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-50 dark:bg-[#020617] transition-colors duration-300 font-sans overflow-hidden">
       {/* Header - Fixed Height */}
       <header className="shrink-0 h-[60px] z-50 backdrop-blur-xl bg-white/80 dark:bg-[#0f172a]/80 border-b border-slate-200/60 dark:border-slate-800/60 px-4 flex items-center justify-between shadow-sm transition-colors duration-300">
         <div className="flex items-center gap-3">
-          <div className="relative w-8 h-8 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-          </div>
-          <h1 className="text-xl font-bold tracking-tight">
+          <img src={logo} alt="Logo" className="w-8 h-8 rounded-xl shadow-lg shadow-indigo-500/20" />
+          <h1 className="text-xl font-bold tracking-tight mr-2">
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-600 dark:from-indigo-400 dark:to-violet-400">GARAN</span>
             <span className="font-light text-slate-600 dark:text-slate-400">MATH</span>
           </h1>
+          <button
+            onClick={() => setIsDonateModalOpen(true)}
+            className="px-3 py-1 rounded-full bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 text-xs font-bold hover:bg-rose-200 dark:hover:bg-rose-900/50 transition-colors flex items-center gap-1"
+          >
+            <span>❤</span> Donate
+          </button>
         </div>
 
         <div className="flex items-center gap-3">
@@ -290,6 +394,20 @@ const MainApp: React.FC = () => {
             <span className="text-sm font-medium text-slate-700 dark:text-slate-300 hidden sm:inline">
               {user?.name}
             </span>
+            <button
+              onClick={() => setIsApiKeyModalOpen(true)}
+              className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline mr-3"
+            >
+              API Key
+            </button>
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="text-xs font-medium text-purple-600 dark:text-purple-400 hover:underline mr-3"
+              >
+                Admin
+              </button>
+            )}
             <button
               onClick={logout}
               className="text-xs font-medium text-rose-600 dark:text-rose-400 hover:underline"
@@ -397,12 +515,21 @@ const MainApp: React.FC = () => {
         <div ref={resultRef} className="flex-grow h-full flex flex-col relative bg-slate-50 dark:bg-[#020617] overflow-hidden border-t lg:border-t-0 border-slate-200 dark:border-slate-800">
           {/* Canvas */}
           <div className="flex-grow relative w-full h-full">
-            <GeoGebraContainer ref={ggbRef} />
+            <GeoGebraContainer ref={ggbRef} transparentGraphics={isTransparent} />
 
             {/* Floating Toolbar */}
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-3 py-2 bg-white/90 dark:bg-[#1e293b]/90 backdrop-blur-md shadow-xl border border-slate-200/50 dark:border-slate-700/50 rounded-2xl overflow-x-auto max-w-[95%]">
               <button onClick={handleRenderToGeoGebra} disabled={!construction} className="p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl transition-colors disabled:opacity-30" title="Re-render">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+              </button>
+
+              <button
+                onClick={handleUndo}
+                disabled={history.length === 0}
+                className="p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl transition-colors disabled:opacity-30"
+                title="Undo"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
               </button>
 
               <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-2"></div>
@@ -420,7 +547,7 @@ const MainApp: React.FC = () => {
                     ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 ring-1 ring-indigo-500/20'
                     : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400'
                     }`}
-                  title="Toggle Line Mode"
+                  title="Độ dày đoạn thẳng"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="20" x2="20" y2="4"></line></svg>
                 </button>
@@ -431,7 +558,7 @@ const MainApp: React.FC = () => {
                     ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 ring-1 ring-indigo-500/20'
                     : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400'
                     }`}
-                  title="Toggle Point Mode"
+                  title="Độ dày điểm"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="12" r="6"></circle></svg>
                 </button>
@@ -450,29 +577,36 @@ const MainApp: React.FC = () => {
 
               <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-2"></div>
 
+              {/* Transparent Toggle */}
+              <button
+                onClick={() => setIsTransparent(!isTransparent)}
+                className={`p-2 rounded-xl transition-colors ${isTransparent ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                title={isTransparent ? "Disable Transparency" : "Enable Transparency"}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path></svg>
+              </button>
+
+
+
               <button onClick={handleClear} className="p-2 hover:bg-rose-50 dark:hover:bg-rose-900/20 text-rose-500 rounded-xl transition-colors" title="Clear">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               </button>
             </div>
           </div>
         </div>
-
+        <ApiKeySettings
+          isOpen={isApiKeyModalOpen}
+          onClose={() => setIsApiKeyModalOpen(false)}
+        />
+        <DonateModal
+          isOpen={isDonateModalOpen}
+          onClose={() => setIsDonateModalOpen(false)}
+        />
       </main>
     </div>
+
   );
 };
-
-// Helper Component
-const ActionButton: React.FC<{ onClick: () => void, disabled: boolean, icon: React.ReactNode, label: string, colorClass: string }> = ({ onClick, disabled, icon, label, colorClass }) => (
-  <button
-    onClick={onClick}
-    disabled={disabled}
-    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${disabled ? 'opacity-40 cursor-not-allowed' : colorClass}`}
-  >
-    {icon}
-    <span className="hidden sm:inline">{label}</span>
-  </button>
-);
 
 const App: React.FC = () => {
   return (
@@ -481,6 +615,22 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/promote"
+            element={
+              <ProtectedRoute>
+                <PromotePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <AdminPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/"
             element={

@@ -1,8 +1,13 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 
 export interface ChatPanelRef {
-  addResponse: (text: string, isError?: boolean) => void;
+  addResponse: (text: string, isError?: boolean, trace?: TraceData) => void;
   clearMessages: () => void;
+}
+
+interface TraceData {
+  planner?: string[];
+  rag?: string[];
 }
 
 interface Message {
@@ -10,6 +15,7 @@ interface Message {
   role: 'user' | 'ai';
   text: string;
   isError?: boolean;
+  trace?: TraceData;
 }
 
 interface ChatPanelProps {
@@ -17,44 +23,34 @@ interface ChatPanelProps {
 }
 
 const ChatPanel = forwardRef<ChatPanelRef, ChatPanelProps>(({ onSendMessage }, ref) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'init',
-      role: 'ai',
-      text: 'Xin chào! Tôi là trợ lý AI của bạn. Tôi có thể giúp bạn chỉnh sửa hình vẽ. Hãy thử yêu cầu: "Nối A với C" hoặc "Lấy trung điểm của SB".'
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]); // Start empty
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useImperativeHandle(ref, () => ({
-    addResponse: (text: string, isError: boolean = false) => {
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'ai',
-        text,
-        isError
-      }]);
+    addResponse: (text: string, isError: boolean = false, trace?: TraceData) => {
+      // Only show response if it's an error
+      if (isError) {
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'ai',
+          text,
+          isError,
+          trace
+        }]);
+
+        // Auto-dismiss errors after 5 seconds
+        setTimeout(() => {
+          setMessages(prev => prev.filter(m => m.text !== text));
+        }, 5000);
+      }
       setIsLoading(false);
     },
     clearMessages: () => {
-      setMessages([{
-        id: 'init',
-        role: 'ai',
-        text: 'Xin chào! Tôi là trợ lý AI của bạn. Tôi có thể giúp bạn chỉnh sửa hình vẽ. Hãy thử yêu cầu: "Nối A với C" hoặc "Lấy trung điểm của SB".'
-      }]);
+      setMessages([]);
     }
   }));
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -63,18 +59,22 @@ const ChatPanel = forwardRef<ChatPanelRef, ChatPanelProps>(({ onSendMessage }, r
     setInput('');
     setIsLoading(true);
 
-    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: textToSend }]);
-
     try {
       await onSendMessage(textToSend);
     } catch (error) {
       console.error(error);
+      const errorMsg = "Không thể kết nối với AI Server.";
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'ai',
-        text: "Không thể kết nối với AI Server.",
+        text: errorMsg,
         isError: true
       }]);
+
+      setTimeout(() => {
+        setMessages(prev => prev.filter(m => m.text !== errorMsg));
+      }, 5000);
+
       setIsLoading(false);
     }
 
@@ -82,76 +82,44 @@ const ChatPanel = forwardRef<ChatPanelRef, ChatPanelProps>(({ onSendMessage }, r
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-[#0f172a] rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-800 overflow-hidden transition-all duration-300">
-      {/* Header */}
-      <div className="px-5 py-4 bg-white dark:bg-[#0f172a] border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center text-white shadow-md shadow-violet-500/20">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-slate-800 dark:text-white leading-tight">AI Assistant</h3>
-            <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${isLoading ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-600'}`}></div>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400">{isLoading ? 'Reasoning...' : 'Online'}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Messages Area */}
-      <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-slate-50/50 dark:bg-[#0f172a] scroll-smooth">
+    <div className="flex flex-col h-full bg-white dark:bg-[#0f172a] rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden relative">
+      {/* Error Toast Area (Floating at top) */}
+      <div className="absolute top-0 left-0 right-0 p-4 space-y-2 pointer-events-none z-10 flex flex-col items-center">
         {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div className={`
-              max-w-[85%] px-4 py-3 text-sm shadow-sm relative animate-in slide-in-from-bottom-1 duration-200
-              ${msg.role === 'user'
-                ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-2xl rounded-br-sm shadow-indigo-500/20'
-                : msg.isError
-                  ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-200 border border-red-200 dark:border-red-800 rounded-2xl rounded-bl-sm'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/50 dark:border-slate-700 rounded-2xl rounded-bl-sm'
-              }
-            `}>
-              {msg.text}
+          msg.isError && (
+            <div key={msg.id} className="pointer-events-auto px-4 py-3 bg-red-50 dark:bg-red-900/90 backdrop-blur-sm text-red-600 dark:text-red-200 rounded-xl text-sm border border-red-100 dark:border-red-800 shadow-lg animate-in slide-in-from-top-2 fade-in duration-200 max-w-md text-center">
+              <span className="font-bold mr-1">Lỗi:</span> {msg.text}
             </div>
-          </div>
+          )
         ))}
-
-        {isLoading && (
-          <div className="flex justify-start w-full">
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-              <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-              <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <div className="p-4 bg-white dark:bg-[#0f172a] border-t border-slate-100 dark:border-slate-800 shrink-0">
-        <div className="relative flex items-center gap-2">
+      {/* Centered Input Area */}
+      <div className="flex-grow flex items-center justify-center p-6">
+        <div className="w-full max-w-2xl relative group">
+          <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-violet-500 rounded-2xl opacity-0 group-focus-within:opacity-20 transition-opacity duration-500 blur"></div>
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder="Modify figure (e.g. 'Connect points')..."
-            className="flex-grow pl-4 pr-12 py-3.5 text-sm bg-slate-50 dark:bg-[#020617] border-none focus:ring-2 focus:ring-indigo-500/30 text-slate-900 dark:text-white rounded-xl transition-all placeholder-slate-400"
+            placeholder="Nhập lệnh chỉnh sửa hình..."
+            className="relative w-full pl-6 pr-14 py-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-0 focus:border-indigo-500 outline-none transition-all text-slate-900 dark:text-white placeholder-slate-400 text-lg shadow-sm"
             disabled={isLoading}
             autoComplete="off"
+            autoFocus
           />
           <button
             onClick={handleSend}
             disabled={isLoading || !input.trim()}
-            className="absolute right-2 p-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:shadow-lg hover:shadow-indigo-500/30 disabled:opacity-50 disabled:shadow-none transition-all"
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-xl disabled:opacity-50 transition-all duration-200"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            {isLoading ? (
+              <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            )}
           </button>
         </div>
       </div>
