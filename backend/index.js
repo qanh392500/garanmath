@@ -5,6 +5,9 @@ import dotenv from 'dotenv';
 import session from 'express-session';
 import { connectDB } from './db/connectDB.js';
 import authRoutes from './routes/auth.route.js';
+import adminRoutes from './routes/admin.route.js';
+import apikeyRoutes from './routes/apikey.route.js';
+import generateRoutes from './routes/generate.route.js';
 import passport from './config/passport.js';
 
 dotenv.config();
@@ -41,9 +44,25 @@ app.get('/', (req, res) => {
     res.json({ success: true, message: 'Server is running!' });
 });
 
+// API Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api", apikeyRoutes);
+app.use("/api", generateRoutes);
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({ success: false, message: 'Route not found' });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+    console.error('Error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Internal server error' });
+});
 
 app.listen(PORT, () => {
 	connectDB();
-	console.log(`Server is running on http://localhost:${PORT}`);
+	console.log(`✅ Backend server running on http://localhost:${PORT}`);
+	console.log(`📡 API endpoints available at http://localhost:${PORT}/api`);
 });

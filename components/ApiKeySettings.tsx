@@ -23,7 +23,8 @@ const ApiKeySettings: React.FC<ApiKeySettingsProps> = ({ isOpen, onClose }) => {
 
     const fetchApiKey = async () => {
         try {
-            const res = await fetch('http://localhost:3001/api/user/apikey', {
+            const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+            const res = await fetch(`${API_URL}/api/user/apikey`, {
                 credentials: 'include'
             });
 
@@ -58,7 +59,8 @@ const ApiKeySettings: React.FC<ApiKeySettingsProps> = ({ isOpen, onClose }) => {
         setMessage('');
 
         try {
-            const res = await fetch('http://localhost:3001/api/user/apikey', {
+            const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+            const res = await fetch(`${API_URL}/api/user/apikey`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -89,7 +91,8 @@ const ApiKeySettings: React.FC<ApiKeySettingsProps> = ({ isOpen, onClose }) => {
         setMessage('');
 
         try {
-            const res = await fetch('http://localhost:3001/api/test-apikey', {
+            const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+            const res = await fetch(`${API_URL}/api/test-apikey`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
@@ -120,7 +123,8 @@ const ApiKeySettings: React.FC<ApiKeySettingsProps> = ({ isOpen, onClose }) => {
         setMessage('');
 
         try {
-            const res = await fetch('http://localhost:3001/api/user/apikey', {
+            const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+            const res = await fetch(`${API_URL}/api/user/apikey`, {
                 method: 'DELETE',
                 credentials: 'include'
             });

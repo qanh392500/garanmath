@@ -28,6 +28,23 @@ const userSchema = new mongoose.Schema(
 			type: Boolean,
 			default: false,
 		},
+		role: {
+			type: String,
+			enum: ['user', 'admin'],
+			default: 'user',
+		},
+		hasApiKey: {
+			type: Boolean,
+			default: false,
+		},
+		geminiApiKey: {
+			type: String,
+			default: null,
+		},
+		keyName: {
+			type: String,
+			default: null,
+		},
 		resetPasswordToken: String,
 		resetPasswordExpiresAt: Date,
 		verificationToken: String,

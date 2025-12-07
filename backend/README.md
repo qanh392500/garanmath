@@ -1,126 +1,81 @@
-# Backend API Documentation
+# Backend API (MongoDB)
 
-## Authentication Endpoints
+## 📋 Tổng quan
 
-Base URL: `http://localhost:5001/api/auth`
+Backend này sử dụng **MongoDB** và chạy trên **port 5001**. Đây là backend chính của ứng dụng.
 
-### 1. Signup
-**POST** `/signup`
-
-Tạo tài khoản mới và gửi email xác thực.
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "password123",
-  "name": "User Name"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "User created successfully",
-  "user": {
-    "email": "user@example.com",
-    "name": "User Name",
-    "isVerified": false
-  }
-}
-```
-
-### 2. Verify Email
-**POST** `/verify-email`
-
-Xác thực email bằng mã 6 chữ số.
-
-**Request Body:**
-```json
-{
-  "code": "123456"
-}
-```
-
-### 3. Login
-**POST** `/login`
-
-Đăng nhập vào hệ thống.
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
-```
-
-### 4. Logout
-**POST** `/logout`
-
-Đăng xuất và xóa cookie.
-
-### 5. Forgot Password
-**POST** `/forgot-password`
-
-Gửi link reset password qua email.
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com"
-}
-```
-
-### 6. Reset Password
-**POST** `/reset-password/:token`
-
-Reset password với token từ email.
-
-**Request Body:**
-```json
-{
-  "password": "newpassword123"
-}
-```
-
-### 7. Check Auth
-**GET** `/check-auth`
-
-Kiểm tra trạng thái đăng nhập (yêu cầu token).
-
-**Response:**
-```json
-{
-  "success": true,
-  "user": {
-    "email": "user@example.com",
-    "name": "User Name",
-    "isVerified": true
-  }
-}
-```
-
-## Environment Variables
-
-Tạo file `.env` dựa trên `.env.example`:
+## 🏗️ Cấu trúc
 
 ```
-MONGO_URI=your_mongodb_connection_string
+backend/
+├── config/           # Configuration (Passport, etc.)
+├── controllers/      # Business logic
+│   ├── auth.controller.js      # Authentication
+│   ├── admin.controller.js     # Admin management
+│   ├── apikey.controller.js    # API key management
+│   └── generate.controller.js   # AI generation
+├── db/               # Database
+│   ├── connectDB.js  # MongoDB connection
+│   └── models/       # Mongoose models
+├── middleware/       # Express middleware
+│   ├── verifyToken.js   # JWT verification
+│   └── verifyAdmin.js   # Admin role check
+├── routes/           # API routes
+│   ├── auth.route.js
+│   ├── admin.route.js
+│   ├── apikey.route.js
+│   └── generate.route.js
+├── utils/            # Utilities
+│   ├── encryption.js         # API key encryption
+│   ├── aiHelpers.js          # AI helper functions
+│   └── generateTokenAndSetCookie.js
+└── index.js          # Main server file
+```
+
+## 🔌 API Endpoints
+
+### Authentication
+- `POST /api/auth/signup` - Đăng ký
+- `POST /api/auth/login` - Đăng nhập
+- `POST /api/auth/logout` - Đăng xuất
+- `GET /api/auth/check-auth` - Kiểm tra auth
+- `POST /api/auth/verify-email` - Xác thực email
+
+### Admin
+- `POST /api/admin/promote-me` - Nâng cấp lên admin
+- `GET /api/admin/users` - Lấy danh sách users
+- `DELETE /api/admin/users/:id` - Xóa user
+- `POST /api/admin/rag/sync` - Sync RAG
+
+### API Key
+- `GET /api/user/apikey` - Lấy API key
+- `POST /api/user/apikey` - Lưu API key
+- `DELETE /api/user/apikey` - Xóa API key
+- `POST /api/test-apikey` - Test API key
+
+### AI Generation
+- `POST /api/generate` - Generate GeoGebra commands
+- `POST /api/chat` - Chat để modify commands
+
+## 🔐 Environment Variables
+
+```env
+MONGO_URI=mongodb://localhost:27017/garanmath
 PORT=5001
-JWT_SECRET=your_jwt_secret_key
-NODE_ENV=development
-
-SMTP_PASSWORD=your_gmail_app_password
-SMTP_NAME=YourAppName
-SMTP_EMAIL=your_email@gmail.com
+JWT_SECRET=your-secret-key
 CLIENT_URL=http://localhost:5173
+ADMIN_SECRET=garanmath2024
+ENCRYPTION_KEY=01234567890123456789012345678901
 ```
 
-## Run Server
+## 🚀 Chạy Server
 
 ```bash
-npm run dev    # Development mode with nodemon
-npm start      # Production mode
+npm run backend
 ```
+
+## 📝 Lưu ý
+
+- Backend này thay thế cho `server/index.js` (SQLite - port 3001)
+- Tất cả frontend calls đã chuyển sang port 5001
+- Database: MongoDB thay vì SQLite

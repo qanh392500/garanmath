@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const PromotePage: React.FC = () => {
     const [secretCode, setSecretCode] = useState('');
@@ -7,6 +8,14 @@ const PromotePage: React.FC = () => {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const navigate = useNavigate();
+    const { login, checkAuth, isAuthenticated, isLoading: authLoading } = useAuth();
+
+    // Redirect if not authenticated
+    useEffect(() => {
+        if (!authLoading && !isAuthenticated) {
+            navigate('/login');
+        }
+    }, [isAuthenticated, authLoading, navigate]);
 
     const handlePromote = async () => {
         if (!secretCode) return;
@@ -15,24 +24,40 @@ const PromotePage: React.FC = () => {
         setError('');
 
         try {
-            const res = await fetch('http://localhost:3001/api/admin/promote-me', {
+            const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+            const res = await fetch(`${API_URL}/api/admin/promote-me`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({ secretCode })
             });
 
+            // Check if response is JSON
+            const contentType = res.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await res.text();
+                setError(`Server error: ${res.status} ${res.statusText}. ${text.substring(0, 100)}`);
+                return;
+            }
+
             const data = await res.json();
-            if (res.ok) {
+            if (res.ok && data.success) {
                 setMessage(data.message);
+                // Update user context with new role
+                if (data.user) {
+                    login(data.user);
+                }
+                // Refresh auth to get latest user data
+                await checkAuth();
                 setTimeout(() => {
-                    window.location.href = '/'; // Force reload to update user role in context
+                    navigate('/');
                 }, 1500);
             } else {
-                setError(data.error);
+                setError(data.error || data.message || 'Failed to promote');
             }
         } catch (err: any) {
-            setError("Error: " + err.message);
+            console.error('Promote error:', err);
+            setError("Error: " + (err.message || 'Network error or server not responding'));
         } finally {
             setIsLoading(false);
         }

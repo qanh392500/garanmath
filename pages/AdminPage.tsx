@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 interface UserData {
-    id: number;
+    id: number | string;
     name: string;
     email: string;
     role: string;
@@ -27,37 +27,50 @@ const AdminPage: React.FC = () => {
 
     const fetchUsers = async () => {
         try {
-            const res = await fetch('http://localhost:3001/api/admin/users', {
+            const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+            const res = await fetch(`${API_URL}/api/admin/users`, {
                 credentials: 'include'
             });
             if (res.ok) {
                 const data = await res.json();
-                setUsers(data.users);
+                if (data.success) {
+                    setUsers(data.users);
+                } else {
+                    setError(data.message || 'Failed to fetch users');
+                }
             } else {
-                setError('Failed to fetch users. Access denied?');
+                const errorData = await res.json().catch(() => ({}));
+                setError(errorData.message || 'Failed to fetch users. Access denied?');
             }
-        } catch (err) {
-            setError('Error fetching users.');
+        } catch (err: any) {
+            setError('Error fetching users: ' + (err.message || 'Network error'));
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = async (id: number | string) => {
         if (!window.confirm('Are you sure you want to delete this user?')) return;
 
         try {
-            const res = await fetch(`http://localhost:3001/api/admin/users/${id}`, {
+            const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+            const res = await fetch(`${API_URL}/api/admin/users/${id}`, {
                 method: 'DELETE',
                 credentials: 'include'
             });
             if (res.ok) {
-                setUsers(users.filter(u => u.id !== id));
+                const data = await res.json();
+                if (data.success) {
+                    setUsers(users.filter(u => u.id !== id));
+                } else {
+                    alert('Failed to delete user: ' + (data.message || 'Unknown error'));
+                }
             } else {
-                alert('Failed to delete user.');
+                const errorData = await res.json().catch(() => ({}));
+                alert('Failed to delete user: ' + (errorData.message || 'Unknown error'));
             }
-        } catch (err) {
-            alert('Error deleting user.');
+        } catch (err: any) {
+            alert('Error deleting user: ' + (err.message || 'Network error'));
         }
     };
 
@@ -67,20 +80,21 @@ const AdminPage: React.FC = () => {
 
         setIsLoading(true);
         try {
-            const res = await fetch('http://localhost:3001/api/admin/rag/sync', {
+            const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+            const res = await fetch(`${API_URL}/api/admin/rag/sync`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({ apiKey })
             });
             const data = await res.json();
-            if (res.ok) {
+            if (res.ok && data.success) {
                 alert(data.message);
             } else {
-                alert("Failed to sync: " + data.error);
+                alert("Failed to sync: " + (data.error || data.message || 'Unknown error'));
             }
         } catch (err: any) {
-            alert("Error syncing RAG: " + err.message);
+            alert("Error syncing RAG: " + (err.message || 'Network error'));
         } finally {
             setIsLoading(false);
         }
@@ -141,7 +155,7 @@ const AdminPage: React.FC = () => {
                                 ) : (
                                     users.map(u => (
                                         <tr key={u.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                            <td className="p-4 text-slate-600 dark:text-slate-400">#{u.id}</td>
+                                            <td className="p-4 text-slate-600 dark:text-slate-400">#{String(u.id).slice(-6)}</td>
                                             <td className="p-4 font-medium text-slate-900 dark:text-white">{u.name}</td>
                                             <td className="p-4 text-slate-600 dark:text-slate-400">{u.email}</td>
                                             <td className="p-4">
