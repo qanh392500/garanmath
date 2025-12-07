@@ -1,17 +1,23 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
+const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+
 interface User {
-    id: number;
+    _id?: string;
+    id?: number;
     name: string;
     email: string;
     role?: 'user' | 'admin';
     hasApiKey?: boolean;
+    isVerified?: boolean;
+    googleId?: string;
 }
+// Define the shape of the AuthContext
 
 interface AuthContextType {
     user: User | null;
     token: string | null;
-    login: (token: string, user: User) => void;
+    login: (user: User) => void;
     logout: () => void;
     isAuthenticated: boolean;
     isLoading: boolean;
@@ -20,43 +26,51 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [user, setUser] = useState<User | null>(() => {
-        try {
-            const storedUser = localStorage.getItem('user');
-            return storedUser ? JSON.parse(storedUser) : null;
-        } catch (e) {
-            console.error("Failed to parse user from local storage", e);
-            return null;
-        }
-    });
+    const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+
+    // Load user from localStorage on mount (for persistence)
+    useEffect(() => {
+        const savedUser = localStorage.getItem('user');
+        if (savedUser) {
+            try {
+                const parsedUser = JSON.parse(savedUser);
+                setUser(parsedUser);
+            } catch (e) {
+                localStorage.removeItem('user');
+            }
+        }
+    }, []);
 
     useEffect(() => {
         const checkAuth = async () => {
             try {
-                const response = await fetch('http://localhost:3001/api/auth/me', {
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                const response = await fetch(`${API_URL}/api/auth/check-auth`, {
                     credentials: 'include'
                 });
 
                 if (response.ok) {
                     const data = await response.json();
-                    console.log("AuthContext: Cookie valid, user:", data.user.email);
-                    setUser(data.user);
-                    localStorage.setItem('user', JSON.stringify(data.user));
-                } else {
-                    if (response.status === 401 || response.status === 403) {
-                        console.warn("AuthContext: Cookie invalid (401/403), clearing.");
+                    if (data.success && data.user) {
+                        setUser(data.user);
+                        // Persist user to localStorage
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                    } else {
+                        // Clear if auth check fails
                         setUser(null);
                         localStorage.removeItem('user');
                     }
+                } else {
+                    setUser(null);
+                    localStorage.removeItem('user');
                 }
             } catch (error) {
-                console.error("AuthContext: Auth check failed (Network/Server Error):", error);
+                console.error("Auth check failed:", error);
+                setUser(null);
+                localStorage.removeItem('user');
+            } finally {
+                setIsLoading(false);
             }
-            setIsLoading(false);
         };
 
         checkAuth();
@@ -65,9 +79,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Sync Logout across tabs
     useEffect(() => {
         const handleStorageChange = (e: StorageEvent) => {
-            if (e.key === 'user' && e.newValue === null) {
-                console.log("AuthContext: User removed in another tab. Logging out.");
+            if (e.key === 'logout-event') {
                 setUser(null);
+                localStorage.removeItem('user');
+            }
+            if (e.key === 'login-event' && e.newValue) {
+                try {
+                    const newUser = JSON.parse(e.newValue);
+                    setUser(newUser);
+                } catch (e) {
+                    console.error("Failed to parse login event", e);
+                }
             }
         };
 
@@ -75,15 +97,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return () => window.removeEventListener('storage', handleStorageChange);
     }, []);
 
-    const login = (newToken: string, newUser: User) => {
-        console.log("AuthContext: Login called.");
+    const login = (newUser: User) => {
         setUser(newUser);
+        // Persist to localStorage
         localStorage.setItem('user', JSON.stringify(newUser));
+        // Sync across tabs
+        localStorage.setItem('login-event', JSON.stringify(newUser));
+        localStorage.removeItem('login-event'); // Trigger event
     };
 
     const logout = async () => {
         try {
-            await fetch('http://localhost:3001/api/auth/logout', {
+            await fetch(`${API_URL}/api/auth/logout`, {
                 method: 'POST',
                 credentials: 'include'
             });
@@ -92,6 +117,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         setUser(null);
         localStorage.removeItem('user');
+        localStorage.setItem('logout-event', Date.now().toString());
     };
 
     return (

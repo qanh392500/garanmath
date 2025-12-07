@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import ProblemInput from './components/ProblemInput';
 import CommandPanel from './components/CommandPanel';
 import ChatPanel, { ChatPanelRef } from './components/ChatPanel';
@@ -9,6 +9,8 @@ import { GeoGebraConstruction } from './types';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import ProfilePage from './pages/ProfilePage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
 import logo from './pages/logo.jpg';
 import ApiKeySettings from './components/ApiKeySettings';
 import AdminPage from './pages/AdminPage';
@@ -17,10 +19,9 @@ import DonateModal from './components/DonateModal';
 
 type LeftPanelMode = 'input' | 'chat';
 
-// --- Protected Route Component ---
+// --- Protected Route Component (Soft Protection - Show Login Modal) ---
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
-  const location = useLocation();
+  const { isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -30,10 +31,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     );
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
+  // Allow access regardless of auth status
   return <>{children}</>;
 };
 
@@ -60,7 +58,7 @@ const MainApp: React.FC = () => {
   const [history, setHistory] = useState<GeoGebraConstruction[]>([]); // Undo History
 
   // Auth Context
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated } = useAuth();
 
   // Resizable State
   // Default height: 55% of window height (Top 45%, Bottom 55%)
@@ -148,6 +146,14 @@ const MainApp: React.FC = () => {
 
 
   const handleGenerate = async (text: string, imageBase64: string | null) => {
+    // Check if user is authenticated
+    if (!isAuthenticated) {
+      if (window.confirm('You need to login to use this feature. Go to login page?')) {
+        navigate('/login');
+      }
+      return;
+    }
+
     setIsGenerating(true);
     try {
       const result = await generateGeoGebraCommands(text, imageBase64);
@@ -237,6 +243,17 @@ const MainApp: React.FC = () => {
   };
 
   const handleChatCommand = async (message: string) => {
+    // Check if user is authenticated
+    if (!isAuthenticated) {
+      chatRef.current?.addResponse('⚠️ Please login to use chat features.', true);
+      setTimeout(() => {
+        if (window.confirm('You need to login to use this feature. Go to login page?')) {
+          navigate('/login');
+        }
+      }, 1000);
+      return;
+    }
+
     try {
       // Save to history before updating (if we have a valid result later)
       const stateBeforeUpdate = construction;
@@ -277,11 +294,21 @@ const MainApp: React.FC = () => {
           setHistory(prev => [...prev, stateBeforeUpdate]);
         }
 
-        // Update local state
-        setConstruction(prev => ({
-          ...prev!,
-          rawCommands: result.commands
-        }));
+        // Update State with the NEW FULL SCRIPT
+        setConstruction(prev => {
+          const base = prev || {
+            points: [],
+            segments: [],
+            rawCommands: [],
+            description: "Interactive Session"
+          };
+
+          return {
+            ...base,
+            rawCommands: result.commands, // Replace, don't append
+            description: base.description + ` (Cập nhật: ${message})`
+          };
+        });
 
         // Re-apply global settings
         setTimeout(() => {
@@ -290,22 +317,7 @@ const MainApp: React.FC = () => {
             ggbRef.current.setGlobalPointSize(pointSize);
           }
         }, 500);
-      }     // Update State with the NEW FULL SCRIPT
-      // Update State with the NEW FULL SCRIPT
-      setConstruction(prev => {
-        const base = prev || {
-          points: [],
-          segments: [],
-          rawCommands: [],
-          description: "Interactive Session"
-        };
-
-        return {
-          ...base,
-          rawCommands: result.commands, // Replace, don't append
-          description: base.description + ` (Cập nhật: ${message})`
-        };
-      });
+      }
 
       chatRef.current?.addResponse(result.message, false, result.trace);
     } catch (error: any) {
@@ -390,31 +402,57 @@ const MainApp: React.FC = () => {
 
         <div className="flex items-center gap-3">
           {/* User Profile / Logout */}
-          <div className="flex items-center gap-3 mr-2">
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-300 hidden sm:inline">
-              {user?.name}
-            </span>
-            <button
-              onClick={() => setIsApiKeyModalOpen(true)}
-              className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline mr-3"
-            >
-              API Key
-            </button>
-            {user?.role === 'admin' && (
+          {isAuthenticated ? (
+            <div className="flex items-center gap-3 mr-2">
+              {/* Avatar with Profile Link */}
               <button
-                onClick={() => navigate('/admin')}
-                className="text-xs font-medium text-purple-600 dark:text-purple-400 hover:underline mr-3"
+                onClick={() => navigate('/profile')}
+                className="flex items-center gap-2 hover:opacity-80 transition-opacity"
               >
-                Admin
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-white font-bold text-sm shadow-lg">
+                  {user?.name?.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300 hidden sm:inline">
+                  {user?.name}
+                </span>
               </button>
-            )}
-            <button
-              onClick={logout}
-              className="text-xs font-medium text-rose-600 dark:text-rose-400 hover:underline"
-            >
-              Logout
-            </button>
-          </div>
+              <button
+                onClick={() => setIsApiKeyModalOpen(true)}
+                className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+              >
+                API Key
+              </button>
+              {user?.role === 'admin' && (
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="text-xs font-medium text-purple-600 dark:text-purple-400 hover:underline"
+                >
+                  Admin
+                </button>
+              )}
+              <button
+                onClick={logout}
+                className="text-xs font-medium text-rose-600 dark:text-rose-400 hover:underline"
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/login')}
+                className="px-4 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+              >
+                Login
+              </button>
+              <button
+                onClick={() => navigate('/register')}
+                className="px-4 py-2 text-sm font-medium bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:shadow-lg hover:shadow-indigo-500/30 transition-all"
+              >
+                Sign Up
+              </button>
+            </div>
+          )}
 
           <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-slate-100/50 dark:bg-slate-800/50 rounded-full border border-slate-200 dark:border-slate-700">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
@@ -615,6 +653,15 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/promote"
             element={
